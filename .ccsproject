@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<?ccsproject version="1.0"?>
+<projectOptions>
+	<ccsVersion value="11.0.0"/>
+	<deviceVariant value="Cortex M.TM4C123GH6PM"/>
+	<deviceFamily value="TMS470"/>
+	<deviceEndianness value="little"/>
+	<codegenToolVersion value="GNU_8.3.1:Energia"/>
+	<isElfFormat value="true"/>
+	<connection value="common/targetdb/connections/Stellaris_ICDI_Connection.xml"/>
+	<rts value=""/>
+	<createSlaveProjects value=""/>
+	<ignoreDefaultDeviceSettings value="true"/>
+	<origin value="C:\my_data\MM_projects\Maslow_HW_design\FW_to_Energia\Firmware-master\cnc_ctrl_v1\cnc_ctrl_v1.ino"/>
+	<filesToOpen value="cnc_ctrl_v1.ino"/>
+	<isTargetManual value="false"/>
+</projectOptions>

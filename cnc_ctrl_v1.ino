@@ -1,0 +1,182 @@
+/*This file is part of the Maslow Control Software.
+    The Maslow Control Software is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+    Maslow Control Software is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+    You should have received a copy of the GNU General Public License
+    along with the Maslow Control Software.  If not, see <http://www.gnu.org/licenses/>.
+    
+    Copyright 2014-2017 Bar Smith*/
+	
+	
+/* To the projects contributers:
+ *
+ * it is highly recommended to activate warning output of the arduino gcc compiler.
+ * Compiler warnings are a great help to keep the codebase clean and can give clues
+ * to potentally wrong code. Also, if a codebase produces too many warnings it gets 
+ * more likely that possibly important warnings could be overlooked. 
+ *
+ * Since the Arduino IDE suppresses any compiler output by default we have to activate it.
+ *
+ * Therefore Arduino IDE users need to activate compiler output in the 
+ * preferences dialog. Additionally Arduino IDE needs to tell the compiler to generate
+ * warning  messages. This is done in the Arduino IDE's preferences.txt file - you can 
+ * get there via the Preferences Dialog - there is a link to the file at the bottom. 
+ * Edit the line "compiler.warning_level=none" to "compiler.warning_level=all"
+ * and restart the IDE.
+ */
+// v1.28    
+
+// TLE9201 version
+// TLE5206 version
+// TB6643 version
+
+#include "Maslow.h"
+//#include <EEPROM.h>
+#include <utility/EEPROM_tdu.h>
+
+#include "timer_isr.h"
+
+// Define system global state structure
+system_t sys;
+
+// Define the global settings storage - treat as readonly
+settings_t sysSettings;
+
+int mm_cmd;
+
+
+// Global realtime executor bitflag variable for setting various alarms.
+byte systemRtExecAlarm;  
+
+// Define global flag for FAKE_SERVO state
+//int FAKE_SERVO_STATE = 0;
+int FAKE_SERVO_STATE = FAKE_SERVO_PERMITTED;  //tdu
+
+// Define axes, it might be tighter to define these within the sys struct
+Axis leftAxis;
+Axis rightAxis;
+Axis zAxis;
+
+// Define kinematics, is it necessary for this to be a class?  Is this really
+// going to be reused?
+Kinematics kinematics;
+
+// velocity
+
+
+void setup(){
+
+    int val = 0xAA;  // EEPROM test
+    int addr = 0x00;
+
+    mm_cmd =0;
+
+    setup_timers(); //tdu 1ms timer isr
+
+    initEEPROM(); //demo EEPROM rd/wr
+
+    Serial.begin(57600);
+    Serial.print(F("PCB v1."));
+    Serial.print(getPCBVersion());
+
+    if (TLE5206 == true) { Serial.print(F(" TLE5206 ")); }
+    if (TLE9201 == true) { Serial.print(F(" TLE9201 ")); }
+    if (TB6643 == true)  { Serial.print(F(" TB6643 ")); }
+
+    // dummy is EEPROM working on Tiva?
+    //addr=0;
+    //EEPROMWrite(addr, val);
+    // end dummy
+
+    Serial.println(F(" Detected"));
+    sys.inchesToMMConversion = 1;
+    sys.writeStepsToEEPROM = false;
+/**/
+    FAKE_SERVO_STATE = EEPROM[ FAKE_SERVO ];
+    if (FAKE_SERVO_STATE == FAKE_SERVO_PERMITTED) { // only this value is accepted
+        Serial.println(F("FAKE_SERVO on"));         // to turn this on
+    } else {
+        Serial.println(F("FAKE_SERVO off"));        // otherwise 
+        EEPROM[ FAKE_SERVO ] = 0;                   // force it to the 'off' value
+    }
+/**/
+    settingsLoadFromEEprom();
+    sys.feedrate = sysSettings.maxFeed / 2.0;
+    setupAxes();
+    settingsLoadStepsFromEEprom();
+    // Set initial desired position of the machine to its current position
+    leftAxis.write(leftAxis.read());
+    rightAxis.write(rightAxis.read());
+    zAxis.write(zAxis.read());
+    readyCommandString.reserve(INCBUFFERLENGTH);           //Allocate memory so that this string doesn't fragment the heap as it grows and shrinks
+    gcodeLine.reserve(INCBUFFERLENGTH);
+
+    #ifndef SIMAVR // Using the timer will crash simavr, so we disable it.
+                   // Instead, we'll run runsOnATimer periodically in loop().
+//    Timer1.initialize(LOOPINTERVAL);
+//    Timer1.attachInterrupt(runsOnATimer);
+    #endif
+    
+    Serial.println(F("Grbl v1.00"));  // Why GRBL?  Apparently because some programs are silly and look for this as an initialization command
+    Serial.println(F("ready"));
+    reportStatusMessage(STATUS_OK);
+
+}
+
+void runsOnATimer(){
+    #if misloopDebug > 0
+    if (inMovementLoop && !movementUpdated){
+        movementFail = true;
+    }
+    #endif
+    movementUpdated = false;
+    leftAxis.computePID();
+    rightAxis.computePID();
+    zAxis.computePID();
+}
+
+
+void loop(){
+    // This section is called on startup and whenever a stop command is issued
+    initGCode();
+    if (sys.stop){               // only called on sys.stop to prevent stopping
+        initMotion();            // on USB disconnect.  Might consider removing 
+        setSpindlePower(false);  // this restriction for safety if we are comfortable that USB disconnects are not a common occurrence anymore
+        laserOff();          // 
+    }                             
+                                 
+    kinematics.init();
+    
+    // Let's go!
+    sys.stop = false;            // We should consider an abort option which
+                                 // is not reset automatically such as a software
+                                 // limit
+    while (!sys.stop){
+        gcodeExecuteLoop();
+        #ifdef SIMAVR // Normally, runsOnATimer() will, well, run on a timer. See also setup().
+        runsOnATimer();
+        #endif
+        execSystemRealtime();
+
+        if(mm_cmd != 0){
+
+            mm_cmd++;  // dummy instructions
+            mm_cmd--;
+
+            switch(mm_cmd){
+
+            case 1:
+                IntMast_enab(); //
+                mm_cmd = 0;
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
